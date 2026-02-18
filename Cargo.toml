@@ -34,7 +34,7 @@ bitcoin = "0.31"
 ed25519-bip32-core = "0.1.1"
 # These are used in offline unit tests, but has to be here because loaded in common modules:
 tokio = "1.45.1"
-
+native-tls = ">= 0.2.13"   # or ">= 0.2.14", check latest on crates.io
 
 [dependencies.ed25519-bip32]
 git = "https://github.com/HRezaei/rust-ed25519-bip32"
