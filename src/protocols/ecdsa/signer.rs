@@ -88,7 +88,14 @@ pub fn sign(
     )?;
     let mut signers_vec: Vec<u16> = Vec::new();
     for j in 0..total_parties as usize {
-        let signer_j: u16 = serde_json::from_str(&round0_ans_vec[j]).unwrap();
+        // Handle both string "3" and number 3 for backwards compatibility
+        let signer_j: u16 = serde_json::from_str::<Value>(&round0_ans_vec[j])
+            .unwrap()
+            .as_u64()
+            .unwrap_or_else(|| {
+                // Fallback: try parsing as string
+                round0_ans_vec[j].trim_matches('"').parse().unwrap()
+            }) as u16;
         signers_vec.push(signer_j - 1);
     }
 
