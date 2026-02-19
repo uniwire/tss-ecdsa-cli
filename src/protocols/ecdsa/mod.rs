@@ -38,12 +38,9 @@ pub struct ECDSAParameters {
 
 impl ECDSAParameters {
 
-    pub fn read_from_file(keys_file_path: String) -> Result<ECDSAParameters, String> {
-        // Read data from keys file
-        let data = fs::read_to_string(keys_file_path.clone())
-            .map_err(|err| format!("Location: {}, Error: {:?}", keys_file_path, err))?;
-
-        match serde_json::from_str(&data) {
+    /// Parse ECDSA parameters from a raw JSON string.
+    pub fn read_from_string(data: &str) -> Result<ECDSAParameters, String> {
+        match serde_json::from_str(data) {
             Ok(params) => {
                 let (party_key, chain_code, shared_keys, party_id, vss_scheme_vec, paillier_key_vec, master_public_key): (
                     Keys,
@@ -72,6 +69,28 @@ impl ECDSAParameters {
             },
             Err(error) => Err(error.to_string()),
         }
+    }
+
+    /// Read ECDSA parameters from a key file.
+    ///
+    /// Supports two formats:
+    /// - **Standalone**: the file contains raw ECDSA key data (a JSON array).
+    /// - **Combined**: the file contains `{"ecdsa": <data>, "eddsa": <data>}` and
+    ///   the ECDSA portion is extracted automatically.
+    pub fn read_from_file(keys_file_path: String) -> Result<ECDSAParameters, String> {
+        let data = fs::read_to_string(keys_file_path.clone())
+            .map_err(|err| format!("Location: {}, Error: {:?}", keys_file_path, err))?;
+
+        // Try combined format first: {"ecdsa": ..., "eddsa": ...}
+        if let Ok(combined) = serde_json::from_str::<serde_json::Value>(&data) {
+            if let Some(ecdsa_value) = combined.get("ecdsa") {
+                let ecdsa_str = ecdsa_value.to_string();
+                return Self::read_from_string(&ecdsa_str);
+            }
+        }
+
+        // Fall back to standalone format
+        Self::read_from_string(&data)
     }
 
     pub fn validate(&self) -> Result<bool, String> {

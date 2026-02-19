@@ -10,6 +10,7 @@ extern crate reqwest;
 extern crate serde_json;
 
 use std::env;
+use std::fs;
 use clap::{App, AppSettings, Arg, SubCommand};
 
 use common::{hd_keys, manager};
@@ -153,6 +154,29 @@ where
                     .default_value("legacy")
                     .possible_values(&["legacy", "bip32"])
                     .help("HD key derivation variant.")),
+            SubCommand::with_name("keygen-all").about("Run keygen for both ECDSA and EdDSA sequentially, producing a single combined key file")
+                .arg(Arg::with_name("keysfile")
+                    .required(true)
+                    .index(1)
+                    .takes_value(true)
+                    .help("Target combined keys file (e.g. keys1.json)"))
+                .arg(Arg::with_name("params")
+                    .index(2)
+                    .required(true)
+                    .takes_value(true)
+                    .help("Threshold params: threshold/parties (t+1/n). E.g. 1/3 for 2 of 3 schema."))
+                .arg(Arg::with_name("manager_addr")
+                    .short("a")
+                    .long("addr")
+                    .takes_value(true)
+                    .help("URL to manager. E.g. http://127.0.0.2:8002"))
+                .arg(Arg::with_name("room_id")
+                    .short("r")
+                    .long("room_id")
+                    .required(false)
+                    .takes_value(true)
+                    .help("Optional unique string to avoid interference between two or more \
+                    groups of parties doing keygen concurrently.")),
             SubCommand::with_name("convert_curv_07_to_09").about("Convert format of store files from v0.1.0 to v0.2.0")
                 .arg(Arg::with_name("input_file")
                     .required(true)
@@ -262,13 +286,73 @@ where
                 .unwrap_or("")
                 .split("/")
                 .collect();
-            match curve {
-                "ecdsa" => ecdsa::keygen::run_keygen(&addr, &keysfile_path, &params, room_id),
-                "eddsa" => eddsa::keygen::run_keygen(&addr, &keysfile_path, &params, room_id),
+            let keygen_json = match curve {
+                "ecdsa" => ecdsa::keygen::run_keygen(&addr, &params, room_id),
+                "eddsa" => eddsa::keygen::run_keygen(&addr, &params, room_id),
                 _ => Err("Invalid curve type specified.".to_string())
             }
-                .map(|_| format!("Keys data written to file: {:?}", keysfile_path))
-                .map_err(|error| format!("Command keygen failed with error: {}", error))
+                .map_err(|error| format!("Command keygen failed with error: {}", error))?;
+
+            fs::write(&keysfile_path, &keygen_json)
+                .map_err(|e| format!("Unable to save keys file: {}", e))?;
+
+            Ok(format!("Keys data written to file: {:?}", keysfile_path))
+        }
+        ("keygen-all", Some(sub_matches)) => {
+            let addr = sub_matches
+                .value_of("manager_addr")
+                .unwrap_or(manager_default_address.as_str())
+                .to_string();
+            let keysfile_path = sub_matches.value_of("keysfile").unwrap_or("").to_string();
+            let room_id = sub_matches.value_of("room_id").unwrap_or("").to_string();
+            let params: Vec<&str> = sub_matches
+                .value_of("params")
+                .unwrap_or("")
+                .split("/")
+                .collect();
+
+            // Step 1: Run ECDSA keygen
+            eprintln!("{{\"event\":\"phase\",\"phase\":\"ecdsa\",\"phase_num\":1,\"total_phases\":2}}");
+            let ecdsa_json = ecdsa::keygen::run_keygen(&addr, &params, room_id.clone())
+                .map_err(|error| format!("ECDSA keygen failed: {}", error))?;
+
+            // Step 2: Run EdDSA keygen
+            eprintln!("{{\"event\":\"phase\",\"phase\":\"eddsa\",\"phase_num\":2,\"total_phases\":2}}");
+            let eddsa_json = eddsa::keygen::run_keygen(&addr, &params, room_id)
+                .map_err(|error| format!("EdDSA keygen failed: {}", error))?;
+
+            // Step 3: Merge into combined format {"ecdsa": ..., "eddsa": ...}
+            let ecdsa_value: serde_json::Value = serde_json::from_str(&ecdsa_json)
+                .map_err(|e| format!("Failed to parse ECDSA keygen output: {}", e))?;
+            let eddsa_value: serde_json::Value = serde_json::from_str(&eddsa_json)
+                .map_err(|e| format!("Failed to parse EdDSA keygen output: {}", e))?;
+
+            // Extract party_index from ECDSA keygen output (4th element, index 3)
+            let party_index = ecdsa_value
+                .as_array()
+                .and_then(|arr| arr.get(3))
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| "Failed to extract party_index from ECDSA keygen output".to_string())?;
+
+            let combined = serde_json::json!({
+                "ecdsa": ecdsa_value,
+                "eddsa": eddsa_value,
+            });
+
+            let combined_json = serde_json::to_string(&combined)
+                .map_err(|e| format!("Failed to serialize combined keys: {}", e))?;
+
+            // Append _{party_index} before .json extension
+            let final_path = if keysfile_path.ends_with(".json") {
+                format!("{}_{}.json", &keysfile_path[..keysfile_path.len() - 5], party_index)
+            } else {
+                format!("{}_{}", keysfile_path, party_index)
+            };
+
+            fs::write(&final_path, combined_json)
+                .map_err(|e| format!("Unable to save combined keys file: {}", e))?;
+
+            Ok(format!("Combined keys (ECDSA + EdDSA) written to file: {:?}", final_path))
         }
         ("convert_curv_07_to_09", Some(sub_matches)) => {
             let source_path = sub_matches.value_of("input_file").unwrap_or("").to_string();

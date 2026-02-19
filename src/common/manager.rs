@@ -200,8 +200,6 @@ fn get(
     request: Json<Index>,
     jwt_guard: ApiKeyJwt
 ) -> Json<Result<Entry, ManagerError>> {
-    println!("Got a GET request from: {:?}", jwt_guard.api_key);
-
     let index: Index = request.0;
     match db_mtx.write() {
         Ok(mut hm) => {
@@ -233,8 +231,6 @@ fn set(db_mtx: &State<RwLock<TtlHashMap<Key, String>>>,
        request: Json<Entry>,
        jwt_guard: ApiKeyJwt
 ) -> Json<Result<(), ManagerError>> {
-    println!("Got a set request from: {:?}", jwt_guard.api_key);
-
     let entry: Entry = request.0;
     match db_mtx.write() {
         Ok(mut hm) => {
@@ -343,7 +339,7 @@ fn signup_sign(
     request: Json<PartySignupRequestBody>,
     jwt_guard: ApiKeyJwt
 ) -> Json<Result<SigningPartySignup, ManagerError>> {
-    println!("Got a signup request for sign from: {:?}", jwt_guard.api_key);
+//     println!("Got a signup request for sign from: {:?}", jwt_guard.api_key);
 
     let threshold = request.clone().threshold;
     let room_id = request.room_id.clone();

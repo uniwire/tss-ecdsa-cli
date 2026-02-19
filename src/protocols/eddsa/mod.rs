@@ -28,11 +28,8 @@ pub struct EdDSAParameters {
 
 impl EdDSAParameters {
 
-    pub fn read_from_file(keys_file_path: String) -> Result<EdDSAParameters, String> {
-        // Read data from keys file
-        let data = fs::read_to_string(keys_file_path.clone()).expect(
-            format!("Unable to load keys file at location: {}", keys_file_path).as_str(),
-        );
+    /// Parse EdDSA parameters from a raw JSON string.
+    pub fn read_from_string(data: &str) -> Result<EdDSAParameters, String> {
         let (party_key, chain_code, shared_keys, party_id, vss_scheme_vec, master_public_key): (
             Keys,
             Scalar<Ed25519>,
@@ -40,7 +37,8 @@ impl EdDSAParameters {
             u16,
             Vec<VerifiableSS<Ed25519>>,
             GE,
-        ) = serde_json::from_str(&data).unwrap();
+        ) = serde_json::from_str(data)
+            .map_err(|e| format!("Failed to parse EdDSA key data: {}", e))?;
 
         let eddsa_params = EdDSAParameters{
             party_key,
@@ -55,6 +53,28 @@ impl EdDSAParameters {
             Ok(_valid) => Ok(eddsa_params),
             Err(e) => Err(e),
         }
+    }
+
+    /// Read EdDSA parameters from a key file.
+    ///
+    /// Supports two formats:
+    /// - **Standalone**: the file contains raw EdDSA key data (a JSON array).
+    /// - **Combined**: the file contains `{"ecdsa": <data>, "eddsa": <data>}` and
+    ///   the EdDSA portion is extracted automatically.
+    pub fn read_from_file(keys_file_path: String) -> Result<EdDSAParameters, String> {
+        let data = fs::read_to_string(keys_file_path.clone())
+            .map_err(|err| format!("Unable to load keys file at location: {}, Error: {:?}", keys_file_path, err))?;
+
+        // Try combined format first: {"ecdsa": ..., "eddsa": ...}
+        if let Ok(combined) = serde_json::from_str::<serde_json::Value>(&data) {
+            if let Some(eddsa_value) = combined.get("eddsa") {
+                let eddsa_str = eddsa_value.to_string();
+                return Self::read_from_string(&eddsa_str);
+            }
+        }
+
+        // Fall back to standalone format
+        Self::read_from_string(&data)
     }
 
     pub fn validate(&self) -> Result<bool, String> {

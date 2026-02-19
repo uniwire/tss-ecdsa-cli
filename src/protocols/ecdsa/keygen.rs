@@ -1,4 +1,4 @@
-use std::{fs, time};
+use std::time;
 use curv::{
     arithmetic::traits::Converter,
     cryptographic_primitives::{
@@ -29,7 +29,7 @@ use crate::protocols::{generate_shared_chain_code};
 use crate::ecdsa::{CURVE_NAME, FE, GE};
 
 
-pub fn run_keygen(addr: &String, keysfile_path: &String, params: &Vec<&str>, room_id: String) -> Result<(), String> {
+pub fn run_keygen(addr: &String, params: &Vec<&str>, room_id: String) -> Result<String, String> {
     let THRESHOLD: u16 = params[0].parse::<u16>().unwrap();
     let PARTIES: u16 = params[1].parse::<u16>().unwrap();
 
@@ -48,9 +48,10 @@ pub fn run_keygen(addr: &String, keysfile_path: &String, params: &Vec<&str>, roo
         parties: PARTIES.to_string(),
     };
 
+    eprintln!("{{\"event\":\"waiting\",\"parties\":{}}}", PARTIES);
     let (party_num_int, uuid) = match keygen_signup(&client, tn_params, CURVE_NAME, room_id) {
         Ok((party_num_int, uuid)) => {
-            println!("number: {:?}, uuid: {:?}, curve: {:?}", party_num_int, uuid, CURVE_NAME);
+            eprintln!("{{\"event\":\"registered\",\"party\":{},\"parties\":{}}}", party_num_int, PARTIES);
             (party_num_int, uuid)
         }
         Err(error) => {
@@ -85,6 +86,8 @@ pub fn run_keygen(addr: &String, keysfile_path: &String, params: &Vec<&str>, roo
         delay,
         serde_json::to_string(&bc_i).unwrap(),
     )?;
+
+    eprintln!("{{\"event\":\"signup\",\"party\":{},\"parties\":{}}}", party_num_int, PARTIES);
 
     let bc1_vec = round1_ans_vec
         .iter()
@@ -123,7 +126,6 @@ pub fn run_keygen(addr: &String, keysfile_path: &String, params: &Vec<&str>, roo
         .expect("invalid key");
 
     //////////////////////////////////////////////////////////////////////////////
-
     let mut j = 0;
     for (k, i) in (1..=PARTIES).enumerate() {
         if i != party_num_int {
@@ -236,6 +238,6 @@ pub fn run_keygen(addr: &String, keysfile_path: &String, params: &Vec<&str>, roo
         y_sum,
     ))
     .unwrap();
-    fs::write(&keysfile_path, keygen_json).expect("Unable to save !");
-    Ok(())
+    eprintln!("{{\"event\":\"complete\"}}");
+    Ok(keygen_json)
 }
